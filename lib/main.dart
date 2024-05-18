@@ -71,7 +71,8 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
   late Animation<double> animation;
   int selected = 0;
   bool showingAnswers = false;
-
+  int tried = 0;
+  int correct = 0;
   final List<(String, String)> usedQuestionAnswers = [];
   Question question = const Question(
       type: '', difficulty: '', category: '', question: '', correctAnswer: '', incorrectAnswers: ['', '', '', '']);
@@ -81,7 +82,14 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
     log(res.statusCode.toString());
 
     if (res.statusCode == 200) {
-      setState(() => question = Question.fromJson((jsonDecode(res.body))['results'][0] as Map<String, dynamic>));
+      Question test = Question.fromJson((jsonDecode(res.body))['results'][0] as Map<String, dynamic>);
+      var obj = (test.correctAnswer, test.question);
+      if (usedQuestionAnswers.contains(obj)) {
+        loadQuestion();
+        return;
+      }
+      usedQuestionAnswers.add(obj);
+      setState(() => question = test);
     } else {
       log(res.headers.toString());
       await Future.delayed(Durations.short2, loadQuestion);
@@ -98,14 +106,6 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
     super.initState();
   }
 
-  void submitAnswer(int index) {
-    showingAnswers = true;
-    selected = index;
-    controller.forward().then((value) => Future.delayed(Durations.short1, () {
-          loadQuestion().then((value) => controller.reset());
-        }));
-  }
-
   @override
   Widget build(BuildContext context) {
     List<String> answers = [];
@@ -114,6 +114,16 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
     }
     answers.add(question.correctAnswer);
     answers.shuffle();
+
+    void submitAnswer(int index) {
+      tried += 1;
+      if (question.correctAnswer == answers[index]) correct += 1;
+      showingAnswers = true;
+      selected = index;
+      controller.forward().then((value) => Future.delayed(Durations.short1, () {
+            loadQuestion().then((value) => controller.reset());
+          }));
+    }
 
     double cardWidth = MediaQuery.of(context).size.width / 4;
     double cardHeight = MediaQuery.of(context).size.height / 4;
@@ -137,7 +147,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                                     : Colors.transparent)
                             : Colors.transparent,
                         elevation: 15 * animation.value,
-                        child: Center(child: Text(text)))),
+                        child: Center(child: Text(HtmlUnescape().convert(text))))),
               ));
     }
 
@@ -173,11 +183,17 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
               ],
             ),
             Padding(
-              padding: const EdgeInsets.all(48.0),
+              padding: const EdgeInsets.all(20.0),
               child: Align(
                   alignment: Alignment.topCenter,
-                  child: Text(HtmlUnescape().convert(question.question),
-                      style: Theme.of(context).textTheme.headlineLarge)),
+                  child: Column(
+                    children: [
+                      Text(HtmlUnescape().convert(question.question), style: Theme.of(context).textTheme.headlineLarge),
+                      Text(question.difficulty),
+                      Text(HtmlUnescape().convert(question.category)),
+                      Text('$correct out of $tried - (${(correct / tried) * 100}%)'),
+                    ],
+                  )),
             ),
           ],
         ),
